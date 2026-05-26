@@ -30,7 +30,7 @@ export default function CollegeProfilePage() {
   useEffect(() => {
     const fetchProfile = async () => {
       try {
-        const res = await fetch('http://localhost:8082/api/college/profile', {
+        const res = await fetch('https://collegebackend-2-gax9.onrender.com/api/college/profile', {
           headers: authHeaders()
         });
         if (res.ok) {
@@ -57,7 +57,7 @@ export default function CollegeProfilePage() {
     e.preventDefault();
     setSaving(true);
     try {
-      const res = await fetch('http://localhost:8082/api/college/profile', {
+      const res = await fetch('https://collegebackend-2-gax9.onrender.com/api/college/profile', {
         method: 'POST',
         headers: { ...authHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
