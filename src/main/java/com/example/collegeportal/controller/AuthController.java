@@ -16,7 +16,7 @@ import com.example.collegeportal.security.JwtUtil;
 
 @RestController
 @RequestMapping("/api/auth")
-@CrossOrigin(origins = "https://silly-scone-46523a.netlify.app")
+@CrossOrigin(origins = "https://eloquent-kashata-c84817.netlify.app")
 public class AuthController {
 
     private final UserRepository userRepository;
