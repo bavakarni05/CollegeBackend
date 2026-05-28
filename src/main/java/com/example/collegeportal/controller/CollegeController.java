@@ -39,7 +39,7 @@ import com.example.collegeportal.security.JwtUtil;
 
 @RestController
 @RequestMapping("/api/college")
-@CrossOrigin(origins = "https://jocular-muffin-e24700.netlify.app", allowedHeaders = "*")
+@CrossOrigin(origins = "https://aesthetic-dieffenbachia-2da675.netlify.app", allowedHeaders = "*")
 public class CollegeController {
 
     @Autowired
