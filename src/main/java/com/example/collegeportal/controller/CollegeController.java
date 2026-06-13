@@ -1,10 +1,5 @@
 package com.example.collegeportal.controller;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -13,7 +8,6 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,7 +17,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -36,6 +29,7 @@ import com.example.collegeportal.model.User;
 import com.example.collegeportal.repository.CollegeRepository;
 import com.example.collegeportal.repository.UserRepository;
 import com.example.collegeportal.security.JwtUtil;
+
 
 @RestController
 @RequestMapping("/api/college")
@@ -57,8 +51,8 @@ public class CollegeController {
     @Autowired
     private CourseRepository courseRepository;
 
-    @Value("${file.upload-dir:uploads}")
-    private String uploadDir;
+    @Autowired
+    private CloudinaryService cloudinaryService;
 
     // Get current college profile
     @GetMapping("/profile")
@@ -78,7 +72,8 @@ public class CollegeController {
 
             return ResponseEntity.ok(college.get());
         } catch (Exception e) {
-            return ResponseEntity.status(401).body(Map.of("error", "Invalid token"));
+            String msg = (e.getMessage() != null) ? e.getMessage() : "Invalid or expired session";
+            return ResponseEntity.status(401).body(Map.of("error", msg));
         }
     }
 
@@ -189,7 +184,8 @@ public class CollegeController {
             response.put("college", saved);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            Map<String, String> error = new HashMap<>();
+            e.printStackTrace();
+            Map<String, Object> error = new HashMap<>();
             String msg = e.getMessage() != null ? e.getMessage() : e.toString();
             error.put("error", "Database error: " + msg);
             return ResponseEntity.status(500).body(error);
@@ -209,16 +205,15 @@ public class CollegeController {
             @RequestParam Double tenthMark,
             @RequestParam Double twelfthMark,
             @RequestParam Double cutoffMark,
-            @RequestPart(required = false) MultipartFile tenthMarksheet,
-            @RequestPart(required = false) MultipartFile twelfthMarksheet,
-            @RequestPart(required = false) MultipartFile photo) {
+            @RequestParam(required = false) MultipartFile tenthMarksheet,
+            @RequestParam(required = false) MultipartFile twelfthMarksheet,
+            @RequestParam(required = false) MultipartFile photo) {
         try {
             Optional<College> collegeOpt = collegeRepository.findById(collegeId);
             if (collegeOpt.isEmpty()) return ResponseEntity.status(404).body(Map.of("error", "College not found"));
             College college = collegeOpt.get();
 
             List<Course> courses = courseRepository.findByCollegeId(collegeId);
-            // More efficient duplicate check using repository query
             String fullCourseName = courseName + " (" + quota + ")";
             Course selectedCourse = courses.stream()
                 .filter(c -> (c.getName() + " (" + (c.getQuota() != null ? c.getQuota() : "N/A") + ")").equals(fullCourseName))
@@ -241,7 +236,8 @@ public class CollegeController {
             app.setCollegeId(collegeId);
             app.setCollegeName(college.getName());
             app.setCourseName(fullCourseName);
-            app.setStatus(selectedCourse != null && selectedCourse.getSeats() <= 0 ? "WAITING_LIST" : "PENDING");
+            Integer seats = (selectedCourse != null) ? selectedCourse.getSeats() : null;
+            app.setStatus(seats != null && seats <= 0 ? "WAITING_LIST" : "PENDING");
             app.setStudentName(studentName);
             app.setStudentEmail(studentEmail);
             app.setStudentPhone(studentPhone);
@@ -249,54 +245,56 @@ public class CollegeController {
             app.setTwelfthMark(twelfthMark);
             app.setCutoffMark(cutoffMark);
             
-            if (tenthMarksheet != null) app.setTenthMarksheetPath(saveFile(tenthMarksheet));
-            if (twelfthMarksheet != null) app.setTwelfthMarksheetPath(saveFile(twelfthMarksheet));
-            if (photo != null) app.setPhotoPath(saveFile(photo));
+            if (tenthMarksheet != null) app.setTenthMarksheetPath(cloudinaryService.uploadFile(tenthMarksheet));
+            if (twelfthMarksheet != null) app.setTwelfthMarksheetPath(cloudinaryService.uploadFile(twelfthMarksheet));
+            if (photo != null) app.setPhotoPath(cloudinaryService.uploadFile(photo));
             
             applicationRepository.save(app);
             return ResponseEntity.ok(Map.of("message", "Application submitted successfully"));
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+            e.printStackTrace();
+            String message = (e.getMessage() != null) ? e.getMessage() : "An error occurred during file upload or database save";
+            Map<String, String> errorResp = new HashMap<>();
+            errorResp.put("error", message);
+            return ResponseEntity.status(500).body(errorResp);
         }
-    }
-
-    private String saveFile(MultipartFile file) throws IOException {
-        Path uploadPath = Paths.get(uploadDir);
-        if (!Files.exists(uploadPath)) {
-            Files.createDirectories(uploadPath);
-        }
-        
-        // Use UUID to prevent filename collisions and sanitize the extension
-        String originalName = file.getOriginalFilename();
-        String extension = originalName != null && originalName.contains(".") ? originalName.substring(originalName.lastIndexOf(".")) : "";
-        String fileName = java.util.UUID.randomUUID().toString() + extension;
-
-        Path filePath = Paths.get(uploadDir, fileName);
-        Files.copy(file.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING);
-        return "/uploads/" + fileName; // Return a URL path
     }
 
     @GetMapping("/applications")
     public ResponseEntity<?> getApplications(@RequestHeader("Authorization") String token) {
         try {
+            if (token == null || !token.startsWith("Bearer ")) {
+                return ResponseEntity.status(401).body(Map.of("error", "Missing or invalid token"));
+            }
             String jwt = token.substring(7);
             Long userId = Long.parseLong(jwtUtil.parseToken(jwt).getBody().getSubject());
             Optional<College> college = collegeRepository.findByUserId(userId);
             if (college.isEmpty()) return ResponseEntity.status(404).body(Map.of("error", "College not found"));
             return ResponseEntity.ok(applicationRepository.findByCollegeId(college.get().getId()));
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+            e.printStackTrace();
+            String message = (e.getMessage() != null) ? e.getMessage() : "Failed to fetch applications due to an internal error";
+            Map<String, String> errorResp = new HashMap<>();
+            errorResp.put("error", message);
+            return ResponseEntity.status(500).body(errorResp);
         }
     }
 
     @GetMapping("/my-applications")
     public ResponseEntity<?> getMyApplications(@RequestHeader("Authorization") String token) {
         try {
+            if (token == null || !token.startsWith("Bearer ")) {
+                return ResponseEntity.status(401).body(Map.of("error", "Missing or invalid token"));
+            }
             String jwt = token.substring(7);
             Long userId = Long.parseLong(jwtUtil.parseToken(jwt).getBody().getSubject());
             return ResponseEntity.ok(applicationRepository.findByStudentId(userId));
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+            e.printStackTrace();
+            String message = (e.getMessage() != null) ? e.getMessage() : "Failed to fetch your applications";
+            Map<String, String> errorResp = new HashMap<>();
+            errorResp.put("error", message);
+            return ResponseEntity.status(500).body(errorResp);
         }
     }
 
@@ -316,8 +314,9 @@ public class CollegeController {
             for (Course course : courses) {
                 String fullCourseName = course.getName() + " (" + (course.getQuota() != null ? course.getQuota() : "N/A") + ")";
                 if (fullCourseName.equals(app.getCourseName())) {
-                    if (course.getSeats() > 0) {
-                        course.setSeats(course.getSeats() - 1);
+                    Integer currentSeats = (course.getSeats() != null) ? course.getSeats() : 0;
+                    if (currentSeats > 0) {
+                        course.setSeats(currentSeats - 1);
                         courseRepository.save(course);
                     }
                     break;
@@ -353,6 +352,9 @@ public class CollegeController {
     @PostMapping("/courses")
     public ResponseEntity<?> updateCourse(@RequestHeader("Authorization") String token, @RequestBody Course course) {
         try {
+            if (token == null || !token.startsWith("Bearer ")) {
+                return ResponseEntity.status(401).body(Map.of("error", "Missing or invalid token"));
+            }
             String jwt = token.substring(7);
             Long userId = Long.parseLong(jwtUtil.parseToken(jwt).getBody().getSubject());
             Optional<College> college = collegeRepository.findByUserId(userId);
@@ -361,7 +363,8 @@ public class CollegeController {
             course.setCollegeId(college.get().getId());
             return ResponseEntity.ok(courseRepository.save(course));
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+            String message = (e.getMessage() != null) ? e.getMessage() : "Failed to update course";
+            return ResponseEntity.status(500).body(Map.of("error", message));
         }
     }
 
