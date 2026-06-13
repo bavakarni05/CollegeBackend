@@ -3,9 +3,9 @@ package com.example.collegeportal.controller;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
-
+ 
 @RestController
-@CrossOrigin(origins = "https://legendary-fairy-9fc3d3.netlify.app")
+@CrossOrigin(origins = "https://lucent-snickerdoodle-1c9078.netlify.app")
 public class RootController {
 
     @GetMapping("/")
