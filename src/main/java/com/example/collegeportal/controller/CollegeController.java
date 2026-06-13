@@ -241,9 +241,13 @@ public class CollegeController {
             app.setCollegeName(college.getName());
             app.setCourseName(fullCourseName);
             
-            // Safe null check for seats to prevent NullPointerException and handle waiting list
-            Integer currentSeats = (selectedCourse != null) ? selectedCourse.getSeats() : 0;
-            app.setStatus(currentSeats != null && currentSeats <= 0 ? "WAITING_LIST" : "PENDING");
+            // Safe check: If course is not found, we shouldn't proceed. 
+            // Otherwise, check if seats are available.
+            if (selectedCourse == null) return ResponseEntity.status(404).body(Map.of("error", "Selected course not found in this college"));
+
+            Integer currentSeats = (selectedCourse.getSeats() != null) ? selectedCourse.getSeats() : 0;
+            app.setStatus(currentSeats <= 0 ? "WAITING_LIST" : "PENDING");
+            
             app.setStudentName(studentName);
             app.setStudentEmail(studentEmail);
             app.setStudentPhone(studentPhone);
