@@ -5,7 +5,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@CrossOrigin(origins = "https://chipper-stroopwafel-5deb10.netlify.app")
+@CrossOrigin(origins = "https://legendary-fairy-9fc3d3.netlify.app")
 public class HelloController {
 
     @GetMapping("/api/health")
