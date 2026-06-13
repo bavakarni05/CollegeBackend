@@ -54,6 +54,9 @@ public class CollegeController {
     @Autowired
     private CloudinaryService cloudinaryService;
 
+    @Autowired
+    private CollegeService collegeService;
+
     // Get current college profile
     @GetMapping("/profile")
     public ResponseEntity<?> getProfile(@RequestHeader("Authorization") String token) {
@@ -72,7 +75,7 @@ public class CollegeController {
 
             return ResponseEntity.ok(college.get());
         } catch (Exception e) {
-            String msg = (e.getMessage() != null) ? e.getMessage() : "Invalid or expired session";
+            String msg = (e.getMessage() != null) ? e.getMessage() : "Invalid token or session expired";
             return ResponseEntity.status(401).body(Map.of("error", msg));
         }
     }
@@ -184,9 +187,9 @@ public class CollegeController {
             response.put("college", saved);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
+            Map<String, String> error = new HashMap<>();
             e.printStackTrace();
-            Map<String, Object> error = new HashMap<>();
-            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+            String msg = (e.getMessage() != null) ? e.getMessage() : "An unexpected database error occurred";
             error.put("error", "Database error: " + msg);
             return ResponseEntity.status(500).body(error);
         }
@@ -214,6 +217,7 @@ public class CollegeController {
             College college = collegeOpt.get();
 
             List<Course> courses = courseRepository.findByCollegeId(collegeId);
+            // More efficient duplicate check using repository query
             String fullCourseName = courseName + " (" + quota + ")";
             Course selectedCourse = courses.stream()
                 .filter(c -> (c.getName() + " (" + (c.getQuota() != null ? c.getQuota() : "N/A") + ")").equals(fullCourseName))
@@ -236,8 +240,10 @@ public class CollegeController {
             app.setCollegeId(collegeId);
             app.setCollegeName(college.getName());
             app.setCourseName(fullCourseName);
-            Integer seats = (selectedCourse != null) ? selectedCourse.getSeats() : null;
-            app.setStatus(seats != null && seats <= 0 ? "WAITING_LIST" : "PENDING");
+            
+            // Safe null check for seats to prevent NullPointerException and handle waiting list
+            Integer currentSeats = (selectedCourse != null) ? selectedCourse.getSeats() : 0;
+            app.setStatus(currentSeats != null && currentSeats <= 0 ? "WAITING_LIST" : "PENDING");
             app.setStudentName(studentName);
             app.setStudentEmail(studentEmail);
             app.setStudentPhone(studentPhone);
@@ -253,10 +259,8 @@ public class CollegeController {
             return ResponseEntity.ok(Map.of("message", "Application submitted successfully"));
         } catch (Exception e) {
             e.printStackTrace();
-            String message = (e.getMessage() != null) ? e.getMessage() : "An error occurred during file upload or database save";
-            Map<String, String> errorResp = new HashMap<>();
-            errorResp.put("error", message);
-            return ResponseEntity.status(500).body(errorResp);
+            String msg = (e.getMessage() != null) ? e.getMessage() : "Internal server error during application";
+            return ResponseEntity.status(500).body(Map.of("error", msg));
         }
     }
 
@@ -272,11 +276,8 @@ public class CollegeController {
             if (college.isEmpty()) return ResponseEntity.status(404).body(Map.of("error", "College not found"));
             return ResponseEntity.ok(applicationRepository.findByCollegeId(college.get().getId()));
         } catch (Exception e) {
-            e.printStackTrace();
-            String message = (e.getMessage() != null) ? e.getMessage() : "Failed to fetch applications due to an internal error";
-            Map<String, String> errorResp = new HashMap<>();
-            errorResp.put("error", message);
-            return ResponseEntity.status(500).body(errorResp);
+            String msg = (e.getMessage() != null) ? e.getMessage() : "Failed to fetch applications";
+            return ResponseEntity.status(500).body(Map.of("error", msg));
         }
     }
 
@@ -290,57 +291,21 @@ public class CollegeController {
             Long userId = Long.parseLong(jwtUtil.parseToken(jwt).getBody().getSubject());
             return ResponseEntity.ok(applicationRepository.findByStudentId(userId));
         } catch (Exception e) {
-            e.printStackTrace();
-            String message = (e.getMessage() != null) ? e.getMessage() : "Failed to fetch your applications";
-            Map<String, String> errorResp = new HashMap<>();
-            errorResp.put("error", message);
-            return ResponseEntity.status(500).body(errorResp);
+            String msg = (e.getMessage() != null) ? e.getMessage() : "Failed to fetch your applications";
+            return ResponseEntity.status(500).body(Map.of("error", msg));
         }
     }
 
     @PostMapping("/applications/{id}/status")
     public ResponseEntity<?> updateStatus(@PathVariable Long id, @RequestBody Map<String, String> data) {
-        Optional<Application> appOpt = applicationRepository.findById(id);
-        if (appOpt.isEmpty()) return ResponseEntity.status(404).body(Map.of("error", "App not found"));
-        
-        Application app = appOpt.get();
-        String oldStatus = app.getStatus();
-        String status = data.get("status");
-        app.setStatus(status);
-        applicationRepository.save(app);
-
-        if ("ACCEPTED".equals(status) && !"ACCEPTED".equals(oldStatus)) {
-            List<Course> courses = courseRepository.findByCollegeId(app.getCollegeId());
-            for (Course course : courses) {
-                String fullCourseName = course.getName() + " (" + (course.getQuota() != null ? course.getQuota() : "N/A") + ")";
-                if (fullCourseName.equals(app.getCourseName())) {
-                    Integer currentSeats = (course.getSeats() != null) ? course.getSeats() : 0;
-                    if (currentSeats > 0) {
-                        course.setSeats(currentSeats - 1);
-                        courseRepository.save(course);
-                    }
-                    break;
-                }
-            }
-        } else if ("ACCEPTED".equals(oldStatus) && !"ACCEPTED".equals(status)) {
-            List<Course> courses = courseRepository.findByCollegeId(app.getCollegeId());
-            for (Course course : courses) {
-                String fullCourseName = course.getName() + " (" + (course.getQuota() != null ? course.getQuota() : "N/A") + ")";
-                if (fullCourseName.equals(app.getCourseName())) {
-                    course.setSeats((course.getSeats() != null ? course.getSeats() : 0) + 1);
-                    courseRepository.save(course);
-                    
-                    List<Application> waiting = applicationRepository.findByCollegeIdAndCourseNameAndStatusOrderByIdAsc(app.getCollegeId(), app.getCourseName(), "WAITING_LIST");
-                    if (!waiting.isEmpty()) {
-                        Application nextInLine = waiting.get(0);
-                        nextInLine.setStatus("PENDING");
-                        applicationRepository.save(nextInLine);
-                    }
-                    break;
-                }
-            }
+        try {
+            String status = data.get("status");
+            collegeService.updateApplicationStatus(id, status);
+            return ResponseEntity.ok(Map.of("message", "Status updated successfully"));
+        } catch (Exception e) {
+            String msg = (e.getMessage() != null) ? e.getMessage() : "Unknown error";
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to update status: " + msg));
         }
-        return ResponseEntity.ok(Map.of("message", "Status updated"));
     }
 
     // Course Catalog Endpoints
@@ -363,8 +328,8 @@ public class CollegeController {
             course.setCollegeId(college.get().getId());
             return ResponseEntity.ok(courseRepository.save(course));
         } catch (Exception e) {
-            String message = (e.getMessage() != null) ? e.getMessage() : "Failed to update course";
-            return ResponseEntity.status(500).body(Map.of("error", message));
+            String msg = (e.getMessage() != null) ? e.getMessage() : "Failed to update course";
+            return ResponseEntity.status(500).body(Map.of("error", msg));
         }
     }
 
