@@ -407,21 +407,16 @@ public class CollegeController {
             Stream<College> stream = colleges.stream();
 
             if (recommend) {
-                // Logical OR for profile-based recommendation details
-                final String fCity = city;
-                final Double fMaxFee = maxFee;
-                final Double fMaxCutoff = maxCutoff;
-
-                boolean hasProfileData = (fCity != null && !fCity.isEmpty() && !"All".equalsIgnoreCase(fCity)) || 
-                                         fMaxFee != null || fMaxCutoff != null;
-
-                if (hasProfileData) {
-                    stream = stream.filter(c -> {
-                        if (fCity != null && !fCity.isEmpty() && !"All".equalsIgnoreCase(fCity) && fCity.equalsIgnoreCase(c.getCity())) return true;
-                        if (fMaxFee != null && ((c.getMinFee() != null && c.getMinFee() <= fMaxFee) || (c.getMaxFee() != null && c.getMaxFee() <= fMaxFee))) return true;
-                        if (fMaxCutoff != null && c.getCutoff() != null && c.getCutoff() <= fMaxCutoff) return true;
-                        return false;
-                    });
+                // Strict matching against profile details
+                if (city != null && !city.isEmpty() && !"All".equalsIgnoreCase(city)) {
+                    stream = stream.filter(c -> city.equalsIgnoreCase(c.getCity()));
+                }
+                if (maxFee != null) {
+                    stream = stream.filter(c -> (c.getMinFee() != null && c.getMinFee() <= maxFee) || 
+                                               (c.getMaxFee() != null && c.getMaxFee() <= maxFee));
+                }
+                if (maxCutoff != null) {
+                    stream = stream.filter(c -> c.getCutoff() != null && c.getCutoff() <= maxCutoff);
                 }
             } else {
                 // Standard Logical AND for search filters
@@ -445,7 +440,7 @@ public class CollegeController {
                                                (c.getMaxFee() != null && c.getMaxFee() <= maxFee));
                 }
                 if (maxCutoff != null) {
-                    stream = stream.filter(c -> c.getCutoff() == null || c.getCutoff() <= maxCutoff);
+                    stream = stream.filter(c -> c.getCutoff() != null && c.getCutoff() <= maxCutoff);
                 }
             }
 
