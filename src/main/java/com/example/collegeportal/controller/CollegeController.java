@@ -212,6 +212,8 @@ public class CollegeController {
             @RequestParam(required = false) MultipartFile twelfthMarksheet,
             @RequestParam(required = false) MultipartFile photo) {
         try {
+            System.out.println("Received application request for college: " + collegeId + " from: " + studentEmail);
+
             Optional<College> collegeOpt = collegeRepository.findById(collegeId);
             if (collegeOpt.isEmpty()) return ResponseEntity.status(404).body(Map.of("error", "College not found"));
             College college = collegeOpt.get();
@@ -223,7 +225,9 @@ public class CollegeController {
                 .filter(c -> (c.getName() + " (" + (c.getQuota() != null ? c.getQuota() : "N/A") + ")").equals(fullCourseName))
                 .findFirst().orElse(null);
 
+            System.out.println("Processing application for course: " + fullCourseName);
             if (applicationRepository.existsByCollegeIdAndCourseNameAndStudentEmailIgnoreCase(collegeId, fullCourseName, studentEmail)) {
+                System.out.println("Duplicate application detected for: " + studentEmail);
                 return ResponseEntity.status(409).body(Map.of("error", "You have already applied for this course at this college."));
             }
             
@@ -242,8 +246,10 @@ public class CollegeController {
             app.setCourseName(fullCourseName);
             
             // Safe check: If course is not found, we shouldn't proceed. 
-            // Otherwise, check if seats are available.
-            if (selectedCourse == null) return ResponseEntity.status(404).body(Map.of("error", "Selected course not found in this college"));
+            if (selectedCourse == null) {
+                System.err.println("Course not found matching: " + fullCourseName);
+                return ResponseEntity.status(404).body(Map.of("error", "Selected course configuration not found."));
+            }
 
             Integer currentSeats = (selectedCourse.getSeats() != null) ? selectedCourse.getSeats() : 0;
             app.setStatus(currentSeats <= 0 ? "WAITING_LIST" : "PENDING");
@@ -255,15 +261,25 @@ public class CollegeController {
             app.setTwelfthMark(twelfthMark);
             app.setCutoffMark(cutoffMark);
             
-            if (tenthMarksheet != null) app.setTenthMarksheetPath(cloudinaryService.uploadFile(tenthMarksheet));
-            if (twelfthMarksheet != null) app.setTwelfthMarksheetPath(cloudinaryService.uploadFile(twelfthMarksheet));
-            if (photo != null) app.setPhotoPath(cloudinaryService.uploadFile(photo));
+            try {
+                if (tenthMarksheet != null && !tenthMarksheet.isEmpty()) 
+                    app.setTenthMarksheetPath(cloudinaryService.uploadFile(tenthMarksheet));
+                if (twelfthMarksheet != null && !twelfthMarksheet.isEmpty()) 
+                    app.setTwelfthMarksheetPath(cloudinaryService.uploadFile(twelfthMarksheet));
+                if (photo != null && !photo.isEmpty()) 
+                    app.setPhotoPath(cloudinaryService.uploadFile(photo));
+            } catch (Exception cloudErr) {
+                System.err.println("Cloudinary Upload Error: " + cloudErr.getMessage());
+                // We can choose to continue without files or return error
+                return ResponseEntity.status(500).body(Map.of("error", "File upload failed. Please check your Cloudinary configuration."));
+            }
             
             applicationRepository.save(app);
+            System.out.println("Application saved successfully for: " + studentEmail);
             return ResponseEntity.ok(Map.of("message", "Application submitted successfully"));
         } catch (Exception e) {
             e.printStackTrace();
-            String msg = (e.getMessage() != null) ? e.getMessage() : "Internal server error during application";
+            String msg = (e.getMessage() != null) ? e.getMessage() : "Internal server error";
             return ResponseEntity.status(500).body(Map.of("error", msg));
         }
     }
