@@ -204,7 +204,7 @@ public class CollegeController {
             @RequestParam String quota,
             @RequestParam String studentName,
             @RequestParam String studentEmail,
-            @RequestParam String studentPhone,
+            @RequestParam(required = false) String studentPhone,
             @RequestParam Double tenthMark,
             @RequestParam Double twelfthMark,
             @RequestParam Double cutoffMark,
@@ -252,7 +252,13 @@ public class CollegeController {
             }
 
             Integer currentSeats = (selectedCourse.getSeats() != null) ? selectedCourse.getSeats() : 0;
-            app.setStatus(currentSeats <= 0 ? "WAITING_LIST" : "PENDING");
+            if (currentSeats > 0) {
+                app.setStatus("PENDING");
+                selectedCourse.setSeats(currentSeats - 1);
+                courseRepository.save(selectedCourse);
+            } else {
+                app.setStatus("WAITING_LIST");
+            }
             
             app.setStudentName(studentName);
             app.setStudentEmail(studentEmail);
@@ -262,12 +268,18 @@ public class CollegeController {
             app.setCutoffMark(cutoffMark);
             
             try {
-                if (tenthMarksheet != null && !tenthMarksheet.isEmpty()) 
+                if (tenthMarksheet != null && !tenthMarksheet.isEmpty()) {
+                    System.out.println("Uploading 10th marksheet...");
                     app.setTenthMarksheetPath(cloudinaryService.uploadFile(tenthMarksheet));
-                if (twelfthMarksheet != null && !twelfthMarksheet.isEmpty()) 
+                }
+                if (twelfthMarksheet != null && !twelfthMarksheet.isEmpty()) {
+                    System.out.println("Uploading 12th marksheet...");
                     app.setTwelfthMarksheetPath(cloudinaryService.uploadFile(twelfthMarksheet));
-                if (photo != null && !photo.isEmpty()) 
+                }
+                if (photo != null && !photo.isEmpty()) {
+                    System.out.println("Uploading photo...");
                     app.setPhotoPath(cloudinaryService.uploadFile(photo));
+                }
             } catch (Exception cloudErr) {
                 System.err.println("Cloudinary Upload Error: " + cloudErr.getMessage());
                 // We can choose to continue without files or return error
@@ -320,6 +332,26 @@ public class CollegeController {
     public ResponseEntity<?> updateStatus(@PathVariable Long id, @RequestBody Map<String, String> data) {
         try {
             String status = data.get("status");
+            
+            // Seat increment logic for cancellation
+            if ("CANCELLED".equalsIgnoreCase(status)) {
+                Optional<Application> appOpt = applicationRepository.findById(id);
+                if (appOpt.isPresent()) {
+                    Application app = appOpt.get();
+                    // Only increment if it was occupying a seat (PENDING or ACCEPTED)
+                    if ("PENDING".equalsIgnoreCase(app.getStatus()) || "ACCEPTED".equalsIgnoreCase(app.getStatus())) {
+                        List<Course> courses = courseRepository.findByCollegeId(app.getCollegeId());
+                        courses.stream()
+                            .filter(c -> (c.getName() + " (" + (c.getQuota() != null ? c.getQuota() : "N/A") + ")").equals(app.getCourseName()))
+                            .findFirst()
+                            .ifPresent(c -> {
+                                c.setSeats((c.getSeats() != null ? c.getSeats() : 0) + 1);
+                                courseRepository.save(c);
+                            });
+                    }
+                }
+            }
+
             collegeService.updateApplicationStatus(id, status);
             return ResponseEntity.ok(Map.of("message", "Status updated successfully"));
         } catch (Exception e) {
